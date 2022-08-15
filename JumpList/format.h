@@ -237,6 +237,7 @@ public:
 				fread(dirEntrys + i * 4 + k, DIR_SIZE, 1, fp);
 				if (!lstrcmpW((dirEntrys + i * 4 + k)->dirName, L"DestList")) {
 					destList = i * 4 + k;
+					dwDestList = (dirEntrys + i * 4 + k)->szStream;
 				}
 			}
 		}
@@ -315,6 +316,11 @@ public:
 		return true;
 	}
 
+	bool AquireSSATChain() {
+		if (!CheckValid()) return false;
+		return true; // ???
+	}
+
 	std::vector<DL_ENTRY> & GetdlEntrys() {
 		return dlEntrys;
 	}
@@ -377,6 +383,7 @@ public:
 		SATChain.clear();
 		fp = NULL;
 		destList = -1;
+		dwDestList = 0;
 		dlEntrys.clear();
 		for (int i = 0; i < 4; ++i) {
 			LoopBuffer[i].buffer = NULL;
@@ -520,10 +527,12 @@ private:
 		OLE_DIR* dirEntrys;  /* each dir entry is 128 bytes*/
 		DWORD szDirs;
 		std::unordered_map<DWORD, std::list<DWORD>>SATChain;
+		std::unordered_map<DWORD, std::list<DWORD>>SSATChain;
 		/* DestList index in dir entry
 		* if DestList not exits,  index = -1
 		*/
 		DWORD destList;
+		DWORD dwDestList;
 		DL_HEAD dlHeader;    /* DestList Header 32 bytes */
 		std::vector<DL_ENTRY> dlEntrys;
 		MBL LoopBuffer[4];
