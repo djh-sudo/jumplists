@@ -7,16 +7,19 @@ using namespace std;
 int main() {
 
 	OLE_OBJECT ole;
-	ole.Init("C:/Users/%username%/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms");
+	ole.Init("../test/579438f135536aec.automaticDestinations-ms");
 	ole.AquireSATChain();
 	ole.GetDirs();
 	ole.GetDestList();
 
 	wcout.imbue(locale("chs"));
+	unsigned int count = 0;
 	for (auto& it : ole.GetdlEntrys()){
 		cout << "lastAccess: " << it.GetLastRecordTime() << endl;
 		wcout << "path: " << it.GetPath() << endl;
+		++count;
 	}
+	cout << "all items number: " << count << endl;
 	system("pause");
 	return 0;
 }

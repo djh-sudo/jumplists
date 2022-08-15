@@ -2,7 +2,7 @@
 #pragma once
 /*
 * Create by djh-sudo 2022-08-03
-* JumpList file Analyse
+* JumpList file Analysis
 * JumpList file often in following path
 * C:/Users/{username}/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/
 */
@@ -198,63 +198,7 @@ private:
 */
 class OLE_OBJECT {
 
-private:
-	FILE* fp;
-
-	OLE_HEADER oleHeader;/* File header 512 bytes */
-	OLE_DIR* dirEntrys;  /* each dir entry is 128 bytes*/
-	DWORD szDirs;
-	std::unordered_map<DWORD, std::list<DWORD>>SATChain;
-	/* DestList index in dir entry
-	* if DestList not exits,  index = -1
-	*/
-	DWORD destList;
-	DL_HEAD dlHeader;    /* DestList Header 32 bytes */
-	std::vector<DL_ENTRY> dlEntrys;
-	MBL LoopBuffer[4];
-
 public:
-	OLE_OBJECT() {
-		memset(&oleHeader, 0, sizeof(oleHeader));
-		dirEntrys = NULL;
-		szDirs = 0;
-		SATChain.clear();
-		fp = NULL;
-		destList = -1;
-		dlEntrys.clear();
-		for (int i = 0; i < 4; ++i) {
-			LoopBuffer[i].buffer = NULL;
-			LoopBuffer[i].next = NULL;
-		}
-	}
-
-	~OLE_OBJECT() {
-		// free memory
-		delete[] dirEntrys;
-		dirEntrys = NULL;
-
-		if (fp != NULL) {
-			fclose(fp);
-			fp = NULL;
-		}
-		for (auto& it : SATChain) {
-			it.second.clear();
-		}
-		SATChain.clear();
-
-		for (int i = 0; i < 4; ++i) {
-			if (LoopBuffer[i].buffer != NULL) {
-				delete[] LoopBuffer[i].buffer;
-				LoopBuffer[i].buffer = NULL;
-				LoopBuffer[i].next = NULL;
-			}
-			else
-				continue;
-		}
-
-		std::vector<DL_ENTRY>().swap(dlEntrys);
-		dlEntrys.clear();
-	}
 
 	bool Init(std::string path) {
 		SATChain.clear();
@@ -426,6 +370,47 @@ public:
 		return true;
 	}
 
+	OLE_OBJECT() {
+		memset(&oleHeader, 0, sizeof(oleHeader));
+		dirEntrys = NULL;
+		szDirs = 0;
+		SATChain.clear();
+		fp = NULL;
+		destList = -1;
+		dlEntrys.clear();
+		for (int i = 0; i < 4; ++i) {
+			LoopBuffer[i].buffer = NULL;
+			LoopBuffer[i].next = NULL;
+		}
+	}
+
+	~OLE_OBJECT() {
+		// free memory
+		delete[] dirEntrys;
+		dirEntrys = NULL;
+
+		if (fp != NULL) {
+			fclose(fp);
+			fp = NULL;
+		}
+		for (auto& it : SATChain) {
+			it.second.clear();
+		}
+		SATChain.clear();
+
+		for (int i = 0; i < 4; ++i) {
+			if (LoopBuffer[i].buffer != NULL) {
+				delete[] LoopBuffer[i].buffer;
+				LoopBuffer[i].buffer = NULL;
+				LoopBuffer[i].next = NULL;
+			}
+			else
+				continue;
+		}
+
+		std::vector<DL_ENTRY>().swap(dlEntrys);
+		dlEntrys.clear();
+	}
 
 private:
 
@@ -528,5 +513,19 @@ private:
 		memcpy(content + curPos, LoopBuffer[(loopId + 2) % 4].buffer, szRead);
 		return;
 	}
+
+	private:
+		FILE* fp;
+		OLE_HEADER oleHeader;/* File header 512 bytes */
+		OLE_DIR* dirEntrys;  /* each dir entry is 128 bytes*/
+		DWORD szDirs;
+		std::unordered_map<DWORD, std::list<DWORD>>SATChain;
+		/* DestList index in dir entry
+		* if DestList not exits,  index = -1
+		*/
+		DWORD destList;
+		DL_HEAD dlHeader;    /* DestList Header 32 bytes */
+		std::vector<DL_ENTRY> dlEntrys;
+		MBL LoopBuffer[4];
 
 };
