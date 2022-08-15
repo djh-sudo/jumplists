@@ -1,7 +1,7 @@
 #pragma once
 #pragma once
 /*
-* Create by djh-sudo 2022-08-03
+* Create by DuanJingHai 2022-08-03
 * JumpList file Analyse
 * JumpList file often in following path
 * C:/Users/{username}/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/
@@ -148,6 +148,9 @@ typedef struct _MEMORY_BUFFER_LINK {
 
 class DL_ENTRY {
 
+private:
+	std::wstring m_path;
+	std::string m_lastRecordTime;
 public:
 	DL_ENTRY() = default;
 
@@ -183,11 +186,6 @@ public:
 	std::string GetLastRecordTime() {
 		return m_lastRecordTime;
 	}
-
-private:
-	std::wstring m_path;
-	std::string m_lastRecordTime;
-
 };
 
 /*
@@ -198,30 +196,16 @@ private:
 */
 class OLE_OBJECT {
 
-private:
-	FILE* fp;
-
-	OLE_HEADER oleHeader;/* File header 512 bytes */
-	OLE_DIR* dirEntrys;  /* each dir entry is 128 bytes*/
-	DWORD szDirs;
-	std::unordered_map<DWORD, std::list<DWORD>>SATChain;
-	/* DestList index in dir entry
-	* if DestList not exits,  index = -1
-	*/
-	DWORD destList;
-	DL_HEAD dlHeader;    /* DestList Header 32 bytes */
-	std::vector<DL_ENTRY> dlEntrys;
-	MBL LoopBuffer[4];
-
 public:
 	OLE_OBJECT() {
-		memset(&oleHeader, 0, sizeof(oleHeader));
+		memoryBuffer = NULL;
+		szMemBuffer = 0;
+
 		dirEntrys = NULL;
 		szDirs = 0;
 		SATChain.clear();
-		fp = NULL;
 		destList = -1;
-		dlEntrys.clear();
+
 		for (int i = 0; i < 4; ++i) {
 			LoopBuffer[i].buffer = NULL;
 			LoopBuffer[i].next = NULL;
@@ -232,11 +216,8 @@ public:
 		// free memory
 		delete[] dirEntrys;
 		dirEntrys = NULL;
+		memoryBuffer = NULL;
 
-		if (fp != NULL) {
-			fclose(fp);
-			fp = NULL;
-		}
 		for (auto& it : SATChain) {
 			it.second.clear();
 		}
@@ -248,27 +229,25 @@ public:
 				LoopBuffer[i].buffer = NULL;
 				LoopBuffer[i].next = NULL;
 			}
-			else
+			else {
 				continue;
+			}
 		}
-
-		std::vector<DL_ENTRY>().swap(dlEntrys);
-		dlEntrys.clear();
 	}
 
-	bool Init(std::string path) {
+	bool Init(const void *buffer, DWORD szBuffer) {
 		SATChain.clear();
 		memset(&oleHeader, 0, sizeof(oleHeader));
+		if(buffer == NULL) return false;
+		memoryBuffer = (BYTE*)buffer;
+		szMemBuffer = szBuffer;
+		if(sizeof(oleHeader) >= szBuffer) return false;
+		memcpy(&oleHeader, memoryBuffer, sizeof(oleHeader));
 
-		fp = fopen(path.c_str(), "rb");
-		if (fp == NULL) return false;
-		else {
-			fread(&oleHeader, sizeof(oleHeader), 1, fp);
-			if ((1 << oleHeader.szSector) == SECTOR_SIZE && (1 << oleHeader.szShortSector) == SHORT_SECTOR_SIZE)
-				return true;
-			else
-				return false;
-		}
+		if((1 << oleHeader.szSector) == SECTOR_SIZE && (1 << oleHeader.szShortSector) == SHORT_SECTOR_SIZE)
+			return true;
+		else
+			return false;
 	}
 
 	bool GetDirs() {
@@ -279,21 +258,24 @@ public:
 		// one sector(512) can store 4 direntrys(128)
 		szDirs = countSector << 2;
 		dirEntrys = new OLE_DIR[szDirs];
-		if (dirEntrys == NULL) return false;// assert(dirEntrys != NULL);
+		if(dirEntrys == NULL) return false;// assert(dirEntrys != NULL);
 		memset(dirEntrys, 0, szDirs * sizeof(OLE_DIR));
 
 		DWORD offset = 0;
 		std::list<DWORD>::iterator it = SATChain[oleHeader.firstDirPos].begin();
 		std::list<DWORD>::iterator end = SATChain[oleHeader.firstDirPos].end();
 
-		for (DWORD i = 0; i < countSector && it != end; ++i, it++) {
+		bool loop = true;
+		for (DWORD i = 0; i < countSector && it != end && loop; ++i, it++) {
 			offset = GetBlock(*it);
-			assert(fseek(fp, offset, SEEK_SET) == 0);
-			for (int k = 0; k < 4; ++k) {
-				fread(dirEntrys + i * 4 + k, DIR_SIZE, 1, fp);
+			for (int k = 0; k < 4 && offset < szMemBuffer; ++k) {
+				memcpy(dirEntrys + i * 4 + k, memoryBuffer + offset, DIR_SIZE);
 				if (!lstrcmpW((dirEntrys + i * 4 + k)->dirName, L"DestList")) {
 					destList = i * 4 + k;
+					loop = false;
+					break;
 				}
+				offset += DIR_SIZE;
 			}
 		}
 		return true;
@@ -308,8 +290,9 @@ public:
 
 		for (DWORD i = 0; i < oleHeader.countSAT; ++i) {
 			DWORD offset = GetBlock(oleHeader.SIDs[i]);
-			assert(fseek(fp, offset, SEEK_SET) == 0);
-			fread(sector, SECTOR_SIZE, 1, fp);
+
+			if(offset > szMemBuffer) return false;
+			memcpy(sector, memoryBuffer + offset, SECTOR_SIZE);
 
 			DWORD prefix = i << 7;
 			DWORD threshHold = (i + 1) << 7;
@@ -371,14 +354,18 @@ public:
 		return true;
 	}
 
-	std::vector<DL_ENTRY> & GetdlEntrys() {
-		return dlEntrys;
-	}
+	bool GetDestList(std::vector<DL_ENTRY>& dlEntrys) {
+		if (destList == -1) {
+			return false;
+		}
 
-	bool GetDestList() {
-		if (destList == -1)  return false;
-		if (destList >= szDirs) return false;
-		if (!InitBufferMemory()) return false;
+		if (destList >= szDirs) {
+			return false;
+		}
+
+		if (!InitBufferMemory()) {
+			return false;
+		}
 
 		DWORD index = (dirEntrys + destList)->firstPos;
 
@@ -393,12 +380,12 @@ public:
 		DWORD szEntrys = 0;
 		DWORD curPos = 0;
 		DWORD oldszRead = 0;
-		bool endFlag = false;
 
 		for (int i = 0; i < 4 && it != end; ++i) {
 			offset = GetBlock(*it++);
-			assert(fseek(fp, offset, SEEK_SET) == 0);
-			fread(LoopBuffer[i].buffer, SECTOR_SIZE, 1, fp);
+
+			if(offset > szMemBuffer) return false;
+			memcpy(LoopBuffer[i].buffer, memoryBuffer + offset, SECTOR_SIZE);
 		}
 
 		memcpy(&dlHeader, LoopBuffer[loopId].buffer, sizeof(dlHeader));
@@ -410,12 +397,12 @@ public:
 			memset(content, 0, SECTOR_SIZE << 1);
 			UpdateMemory(content, loopId, szRead);
 			// Analyse DestList
-			oldszRead = AnalyseDestList(content, i);
-			if (oldszRead == 0 || oldszRead > (SECTOR_SIZE << 1)) break;
+			oldszRead = AnalyseDestList(content, i, dlEntrys);
+			if(oldszRead == 0 || oldszRead > (SECTOR_SIZE << 1)) break;
 			szRead += oldszRead;
 			while (szRead > SECTOR_SIZE) {
 				if (it != end) {
-					UpdateSector(*it++, loopId, szRead, endFlag);
+					UpdateSector(*it++, loopId, szRead);
 					continue;
 				}
 				if (it == end) {
@@ -425,19 +412,42 @@ public:
 		}
 		return true;
 	}
-
+	/*
+	 * Support Windows 10 / 11
+	*/
+	static void GetContent(const void *memoryBuffer, DWORD szBuffer, std::vector<DL_ENTRY>&res) {
+		OLE_OBJECT ole;
+		if(!ole.Init(memoryBuffer, szBuffer)) return;
+		if(!ole.AquireSATChain()) return;
+		if(!ole.GetDirs()) return;
+		if(!ole.GetDestList(res)) return;
+	}
 
 private:
+	BYTE* memoryBuffer;
+	DWORD szMemBuffer;
+	OLE_HEADER oleHeader;/* File header 512 bytes */
+	OLE_DIR* dirEntrys;  /* each dir entry is 128 bytes*/
+	DWORD szDirs;
+	std::unordered_map<DWORD, std::list<DWORD>>SATChain;
+	/* DestList index in dir entry 
+	 * if DestList not exits, index = -1
+	*/
+	DWORD destList;
+	DL_HEAD dlHeader;    /* DestList Header 32 bytes */
+	MBL LoopBuffer[4];
 
+private:
+	
 	inline bool CheckValid() {
-		return !(fp == NULL || oleHeader.SIDs == NULL);
+		return !(memoryBuffer == NULL || oleHeader.SIDs == NULL);
 	}
 
 	bool InitBufferMemory() {
 		int i = 0;
 		for (i; i < 4; ++i) {
 			LoopBuffer[i].buffer = new BYTE[SECTOR_SIZE];
-			if (LoopBuffer[i].buffer == NULL) break;
+			if(LoopBuffer[i].buffer == NULL) break; 
 			memset(LoopBuffer[i].buffer, 0, SECTOR_SIZE);
 		}
 		for (int k = 0; k < 4; ++k) {
@@ -457,20 +467,47 @@ private:
 		return true;
 	}
 
-	DWORD AnalyseDestList(const BYTE* content, DWORD& counter) {
-		if (content == NULL) return 0;
+	bool UpdateSector(const DWORD off, DWORD& loopId, DWORD& szRead, bool flag = false) {
+		// Load an new sector
+		if (!flag) {
+			DWORD offset = GetBlock(off);
+			memset(LoopBuffer[loopId].buffer, 0, SECTOR_SIZE);
+			if(offset > szMemBuffer) return false;
+			memcpy(LoopBuffer[loopId].buffer, memoryBuffer + offset, SECTOR_SIZE);
+		}
+		else {
+			memset(LoopBuffer[loopId].buffer, 0, SECTOR_SIZE);
+		}
+		// step 2 Step Next Memory
+		loopId = (loopId + 1) % 4;
+		// step 3 Update szRead
+		szRead = szRead - SECTOR_SIZE;
+		return true;
+	}
+
+	void UpdateMemory(BYTE *content, const DWORD loopId, const DWORD szRead) {
+		DWORD curPos = SECTOR_SIZE - szRead;
+		memcpy(content, LoopBuffer[loopId].buffer + szRead, curPos);
+		memcpy(content + curPos, LoopBuffer[(loopId + 1) % 4].buffer, SECTOR_SIZE);
+		curPos += SECTOR_SIZE;
+		memcpy(content + curPos, LoopBuffer[(loopId + 2) % 4].buffer,szRead);
+		return;
+	}
+
+	DWORD AnalyseDestList(const BYTE* content, DWORD& counter, std::vector<DL_ENTRY>& dlEntrys) {
+		if(content == NULL) return 0;
 		DWORD szRead = 0;
 		DL_ENTRY10* entry;
 		DL_ENTRY obj;
 		SYSTEMTIME sysTime;
 
-		// FILETIME lastAccess; // offset :100 - 108
-		// WORD szPath = 0;     // offset :128 - 130
+		// FILETIME lastAccess; // offset : 100 - 108
+		// WORD szPath = 0;     // offset : 128 - 130
 		do {
 			entry = (DL_ENTRY10*)(content + szRead);
 			if (((entry->szPath << 1) + WIN_10_ENTRY + 4 + szRead) < (SECTOR_SIZE << 1)) {
 				obj.Init();
-				ConvertTime(&entry->lastAccessTime, &sysTime);
+				if(!ConvertTime(&entry->lastAccessTime, &sysTime)) return 0;
 				obj.setTime(sysTime);
 				obj.setPath((wchar_t*)((BYTE*)content + WIN_10_ENTRY + szRead), entry->szPath);
 				dlEntrys.push_back(obj);
@@ -480,7 +517,8 @@ private:
 			else {
 				break;
 			}
-		} while (szRead < (SECTOR_SIZE << 1) - WIN_10_ENTRY && counter < dlHeader.szEntry);
+		}
+		while (szRead < (SECTOR_SIZE << 1) - WIN_10_ENTRY &&counter < dlHeader.szEntry);
 		return szRead;
 	}
 
@@ -493,40 +531,13 @@ private:
 	}
 
 	bool ConvertTime(FILETIME* fileTime, LPSYSTEMTIME sysTime) {
-		assert(sysTime != NULL);
+		if(sysTime == NULL) return false;
 		FILETIME localTime[sizeof(FILETIME)] = { 0 };
 		FileTimeToLocalFileTime(fileTime, localTime);
 		if (localTime == NULL) return false;
 		FileTimeToSystemTime(localTime, sysTime);
 		if (sysTime == NULL) return false;
 		return true;
-	}
-
-	void UpdateSector(const DWORD off, DWORD& loopId, DWORD& szRead, bool flag = false) {
-		// Load an new sector
-		if (!flag) {
-			DWORD offset = GetBlock(off);
-			assert(fseek(fp, offset, SEEK_SET) == 0);
-			memset(LoopBuffer[loopId].buffer, 0, SECTOR_SIZE);
-			fread(LoopBuffer[loopId].buffer, SECTOR_SIZE, 1, fp);
-		}
-		else {
-			memset(LoopBuffer[loopId].buffer, 0, SECTOR_SIZE);
-		}
-		// step 2 Step Next Memory
-		loopId = (loopId + 1) % 4;
-		// step 3 Update szRead
-		szRead = szRead - SECTOR_SIZE;
-		return;
-	}
-
-	void UpdateMemory(BYTE* content, const DWORD loopId, const DWORD szRead) {
-		DWORD curPos = SECTOR_SIZE - szRead;
-		memcpy(content, LoopBuffer[loopId].buffer + szRead, curPos);
-		memcpy(content + curPos, LoopBuffer[(loopId + 1) % 4].buffer, SECTOR_SIZE);
-		curPos += SECTOR_SIZE;
-		memcpy(content + curPos, LoopBuffer[(loopId + 2) % 4].buffer, szRead);
-		return;
 	}
 
 };
