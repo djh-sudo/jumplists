@@ -235,7 +235,8 @@ public:
 		std::list<DWORD>::iterator it = SATChain[oleHeader.firstDirPos].begin();
 		std::list<DWORD>::iterator end = SATChain[oleHeader.firstDirPos].end();
 
-		for (DWORD i = 0; i < countSector && it != end; ++i, it++) {
+		bool loop = true;
+		for (DWORD i = 0; i < countSector && it != end && loop; ++i, it++) {
 			offset = GetBlock(*it);
 			assert(fseek(fp, offset, SEEK_SET) == 0);
 			for (int k = 0; k < 4; ++k) {
@@ -243,6 +244,8 @@ public:
 				if (!lstrcmpW((dirEntrys + i * 4 + k)->dirName, L"DestList")) {
 					destList = i * 4 + k;
 					dwDestList = (dirEntrys + i * 4 + k)->szStream;
+					loop = false;
+					break;
 				}
 			}
 		}
