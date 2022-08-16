@@ -6,7 +6,7 @@ using namespace std;
 /*
 * Recent access file store at
 * C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*
-* C:\\Users\\Administrator\\Desktop\\djh\\JumpLists\\JumpLists\\test\\fb*
+* C:\\Users\\Administrator\\Desktop\\djh\\JumpLists\\JumpLists\\test\\cc*
 */
 
 
@@ -21,7 +21,7 @@ int main() {
 		return false;
 	}
 	//
-	string basePath = "C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*";
+	string basePath = "C:\\Users\\DELL\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*";
 	long hFile = 0;
 	struct _finddata_t fileInfo;
 	hFile = _findfirst(basePath.c_str(), &fileInfo);
@@ -31,6 +31,7 @@ int main() {
 	}
 	unsigned int count = 0;
 	basePath.pop_back();
+
 	do {
 		if (!strcmp(fileInfo.name, ".") ||  !strcmp(fileInfo.name, "..")) {
 			continue;
@@ -58,7 +59,7 @@ int main() {
 			status = ole.GetDestListFromSAT();
 		}
 		
-		cout << fileInfo.name << ":" << endl;
+		// cout << fileInfo.name << ":" << endl;
 		for (auto& it : ole.GetdlEntrys()) {
 			
 			// cout << "\tlastAccess: " << it.GetLastRecordTime() << endl;

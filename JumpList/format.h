@@ -433,13 +433,24 @@ public:
 		szEntrys = dlHeader.szEntry;
 
 		BYTE content[SECTOR_SIZE << 1] = { 0 };
-
-		for (DWORD i = 0; i < szEntrys;) {
+		DWORD i = 0;
+		for (i = 0; i < szEntrys;) {
 			memset(content, 0, SECTOR_SIZE << 1);
 			UpdateMemory(content, loopId, szRead);
 			// Analysis DestList
 			oldszRead = AnalyseDestList(content, i);
-			if (oldszRead == 0 || oldszRead > (SECTOR_SIZE << 1)) break;
+			if (oldszRead == 0) {
+				// slow path
+				if (i < szEntrys) {
+					BYTE largeMemory[SECTOR_SIZE << 2] = { 0 };
+					memcpy(largeMemory, content, SECTOR_SIZE << 1);
+					UpdateMemory(largeMemory + (SECTOR_SIZE << 1), loopId, 0);
+					oldszRead = AnalyseDestList(largeMemory, i, SECTOR_SIZE << 1);
+				}
+				if (oldszRead == 0) {
+					break;
+				}
+			}
 			szRead += oldszRead;
 			while (szRead > SECTOR_SIZE) {
 				if (it != end) {
@@ -450,6 +461,9 @@ public:
 					UpdateSector(0, loopId, szRead, true);
 				}
 			}
+		}
+		if (i < szEntrys) {
+			return false;
 		}
 		return true;
 	}
@@ -582,7 +596,7 @@ private:
 		return true;
 	}
 
-	DWORD AnalyseDestList(const BYTE* content, DWORD& counter) {
+	DWORD AnalyseDestList(const BYTE* content, DWORD& counter, int baseLen = SECTOR_SIZE) {
 		if (content == NULL) return 0;
 		DWORD szRead = 0;
 		DL_ENTRY10* entry;
@@ -593,7 +607,7 @@ private:
 		// WORD szPath = 0;     // offset :128 - 130
 		do {
 			entry = (DL_ENTRY10*)(content + szRead);
-			if (((entry->szPath << 1) + WIN_10_ENTRY + 4 + szRead) < (SECTOR_SIZE << 1)) {
+			if (((entry->szPath << 1) + WIN_10_ENTRY + 4 + szRead) < (baseLen << 1)) {
 				obj.Init();
 				ConvertTime(&entry->lastAccessTime, &sysTime);
 				obj.setTime(sysTime);
@@ -605,7 +619,7 @@ private:
 			else {
 				break;
 			}
-		} while (szRead < (SECTOR_SIZE << 1) - WIN_10_ENTRY && counter < dlHeader.szEntry);
+		} while (szRead < (baseLen) - WIN_10_ENTRY && counter < dlHeader.szEntry);
 		return szRead;
 	}
 
@@ -644,6 +658,7 @@ private:
 		szRead = szRead - SECTOR_SIZE;
 		return;
 	}
+
 
 	void UpdateMemory(BYTE* content, const DWORD loopId, const DWORD szRead) {
 		DWORD curPos = SECTOR_SIZE - szRead;
