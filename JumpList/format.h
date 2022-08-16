@@ -34,9 +34,11 @@ typedef __int64 QWORD;
 #define SID_COUNT         128
 #define DIR_SIZE          128
 #define SHORT_SECTOR_SIZE 64
+#define MINI_SID_COUNT    16
 
 #define WIN_10_ENTRY     130
 #define WIN_7_ENTRY      114
+
 
 typedef struct _OLE_HEADER {
 	/* Offset  Description*/
@@ -149,9 +151,6 @@ typedef struct _MEMORY_BUFFER_LINK {
 class DL_ENTRY {
 
 public:
-	DL_ENTRY() = default;
-
-	~DL_ENTRY() = default;
 
 	void Init() {
 		m_path = L"";
@@ -176,13 +175,17 @@ public:
 		return true;
 	}
 
-	std::wstring GetPath() {
+	std::wstring GetPath() const {
 		return m_path;
 	}
 
-	std::string GetLastRecordTime() {
+	std::string GetLastRecordTime() const {
 		return m_lastRecordTime;
 	}
+
+	DL_ENTRY() = default;
+
+	~DL_ENTRY() = default;
 
 private:
 	std::wstring m_path;
@@ -202,6 +205,8 @@ public:
 
 	bool Init(std::string path) {
 		SATChain.clear();
+		SSATChain.clear();
+
 		memset(&oleHeader, 0, sizeof(oleHeader));
 
 		fp = fopen(path.c_str(), "rb");
@@ -318,14 +323,85 @@ public:
 
 	bool AquireSSATChain() {
 		if (!CheckValid()) return false;
-		return true; // ???
+		if (SATChain.find(oleHeader.firstSSATPos) == SATChain.end()) {
+			return false;
+		}
+
+		std::list<DWORD>::iterator it = SATChain[oleHeader.firstSSATPos].begin();
+		std::list<DWORD>::iterator end = SATChain[oleHeader.firstSSATPos].end();
+
+		DWORD sector[SID_COUNT] = { 0 };
+		std::unordered_map<int, int>isOverflow;
+		DWORD i = 0;
+		
+		for (it; it != end && i < oleHeader.countSSAT; it++, ++i) {
+			DWORD offset = GetBlock(*it);
+			assert(fseek(fp, offset, SEEK_SET) == 0);
+			fread(sector, SECTOR_SIZE, 1, fp);
+
+			DWORD prefix = i << 7;
+			DWORD threshHold = (i + 1) << 7;
+			DWORD updateFlag = -1;
+
+			for (DWORD k = 0; k < SID_COUNT; ++k) {
+				updateFlag = -1;
+				if (sector[k] == ID_UNUSED) continue;
+				if (sector[k] == ID_SAT) {
+					continue;
+				}
+				else {
+					std::list<DWORD>tmp;
+					DWORD index = k + prefix;
+					DWORD nextNode = 0;
+					
+					if (isOverflow.find(index) != isOverflow.end()) {
+						tmp = SSATChain[isOverflow[index]];
+						updateFlag = isOverflow[index];
+					}
+					else {
+						tmp.clear();
+					}
+
+					do {
+						if (index >= prefix) {
+							tmp.push_back(index);
+							nextNode = sector[index - prefix];
+							sector[index - prefix] = ID_UNUSED;
+							index = nextNode;
+						}
+						else {
+							assert(SSATChain.find(index) != SSATChain.end());
+							// merge
+							tmp.splice(tmp.end(), SSATChain[index]);
+							SSATChain.erase(index);
+							break;
+						}
+					} while (index < threshHold && index != ID_SECTOR_END);
+					// update FAT Chain
+					if (updateFlag == -1)  SSATChain[k + prefix] = tmp;
+					else  SSATChain[updateFlag] = tmp;
+					// Handle index overflow 
+					if (index >= threshHold && index != ID_SECTOR_END) {
+						if (updateFlag == -1)  isOverflow[index] = k + prefix;
+						else  isOverflow[index] = updateFlag;
+					}
+					if (index < prefix && index != ID_SECTOR_END) {
+						for (auto& it : isOverflow) {
+							if (it.second == index) it.second = updateFlag;
+						}
+					}
+				}
+			}
+		}
+		isOverflow.clear();
+		return true;
 	}
 
 	std::vector<DL_ENTRY> & GetdlEntrys() {
 		return dlEntrys;
 	}
 
-	bool GetDestList() {
+	bool GetDestListFromSAT() {
 		if (destList == -1)  return false;
 		if (destList >= szDirs) return false;
 		if (!InitBufferMemory()) return false;
@@ -359,7 +435,7 @@ public:
 		for (DWORD i = 0; i < szEntrys;) {
 			memset(content, 0, SECTOR_SIZE << 1);
 			UpdateMemory(content, loopId, szRead);
-			// Analyse DestList
+			// Analysis DestList
 			oldszRead = AnalyseDestList(content, i);
 			if (oldszRead == 0 || oldszRead > (SECTOR_SIZE << 1)) break;
 			szRead += oldszRead;
@@ -374,6 +450,61 @@ public:
 			}
 		}
 		return true;
+	}
+
+	bool GetDestListFromSSAT() {
+		if (destList == -1)  return false;
+		if (destList >= szDirs) return false;
+		if (dwDestList > 4096) return false;
+
+		DWORD index = (dirEntrys + destList)->firstPos;
+		if (SSATChain.find(index) == SSATChain.end()) return false;
+		if (SSATChain[index].size() > 64) return false;
+
+		DWORD firstIdx = dirEntrys->firstPos;
+		std::list<DWORD>::iterator it = SATChain[firstIdx].begin();
+		std::list<DWORD>::iterator end = SATChain[firstIdx].end();
+	
+		std::list<DWORD>::iterator ssatIt = SSATChain[index].begin();
+		std::list<DWORD>::iterator ssatEnd = SSATChain[index].end();
+
+		DWORD offset = 0;
+		DWORD szRead = 0;
+		DWORD szEntrys = 0;
+		DWORD oldszRead = 0;
+
+		BYTE content[SECTOR_SIZE << 3] = { 0 };
+		for (int k = 0; ssatIt != ssatEnd && it != end; k++) {
+			offset = GetBlock(*it++);
+			DWORD threshHold = (k + 1) << 9;
+			DWORD prefix = k << 9;
+			
+			while(ssatIt != ssatEnd && GetMiniBlock(*ssatIt) < threshHold){
+				DWORD index = GetMiniBlock(*ssatIt) - prefix;
+				assert(fseek(fp, offset + index, SEEK_SET) == 0);
+				fread(content + szRead, SHORT_SECTOR_SIZE, 1, fp);
+				ssatIt++;
+				szRead += SHORT_SECTOR_SIZE;
+			}
+		}
+
+		memcpy(&dlHeader, content, sizeof(dlHeader));
+		szEntrys = dlHeader.szEntry;
+
+		szRead = 32;
+		for (DWORD i = 0; i < szEntrys;) {
+			// Analysis DestList
+			oldszRead = AnalyseDestList(content + szRead, i);
+			if (oldszRead == 0 || oldszRead > (SECTOR_SIZE << 1)) break;
+			szRead += oldszRead;
+			if (szRead > 4096) break;
+		}
+		return true;
+
+	}
+
+	DWORD GetdwDestList() const {
+		return dwDestList;
 	}
 
 	OLE_OBJECT() {
@@ -476,11 +607,11 @@ private:
 		return szRead;
 	}
 
-	DWORD GetBlock(const DWORD sid) {
+	DWORD GetBlock(const DWORD sid) const {
 		return (sid + 1) * SECTOR_SIZE;
 	}
 
-	DWORD GetMiniBlock(const DWORD sid) {
+	DWORD GetMiniBlock(const DWORD sid) const {
 		return sid * SHORT_SECTOR_SIZE;
 	}
 
@@ -521,6 +652,7 @@ private:
 		return;
 	}
 
+
 	private:
 		FILE* fp;
 		OLE_HEADER oleHeader;/* File header 512 bytes */
@@ -536,5 +668,5 @@ private:
 		DL_HEAD dlHeader;    /* DestList Header 32 bytes */
 		std::vector<DL_ENTRY> dlEntrys;
 		MBL LoopBuffer[4];
-
 };
+
