@@ -169,7 +169,6 @@ public:
 	bool setPath(const wchar_t* p, DWORD szPath) {
 		m_path = std::wstring(p, szPath);
 		if (m_path.size() != szPath) {
-			// assert(m_path.size() == szPath);
 			return false;
 		}
 		return true;
@@ -654,7 +653,6 @@ private:
 		memcpy(content + curPos, LoopBuffer[(loopId + 2) % 4].buffer, szRead);
 		return;
 	}
-
 
 	private:
 		FILE* fp;

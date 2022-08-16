@@ -6,13 +6,21 @@ using namespace std;
 /*
 * Recent access file store at
 * C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*
+* C:\\Users\\Administrator\\Desktop\\djh\\JumpLists\\JumpLists\\test\\fb*
 */
 
-int main() {
-	
-	bool status = false;
-	// 
 
+int main() {
+	ios::sync_with_stdio(false);
+	locale::global(locale(""));
+	bool status = false;
+	//
+	FILE* fp = NULL;
+	fopen_s(&fp, "result.txt", "w, ccs=utf-8");
+	if (fp == NULL) {
+		return false;
+	}
+	//
 	string basePath = "C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*";
 	long hFile = 0;
 	struct _finddata_t fileInfo;
@@ -41,6 +49,7 @@ int main() {
 		if (status == false) {
 			continue;
 		}
+		
 		if (status && ole.GetdwDestList() <= 4096) {
 			ole.AquireSSATChain();
 			ole.GetDestListFromSSAT();
@@ -48,11 +57,13 @@ int main() {
 		else {
 			status = ole.GetDestListFromSAT();
 		}
-		wcout.imbue(locale("chs"));
+		
 		cout << fileInfo.name << ":" << endl;
 		for (auto& it : ole.GetdlEntrys()) {
-			cout << "\tlastAccess: " << it.GetLastRecordTime() << endl;
-			wcout << "\tpath: " << it.GetPath() << endl;
+			
+			// cout << "\tlastAccess: " << it.GetLastRecordTime() << endl;
+			// wcout << L"\t" << it.GetPath() << endl;
+			fwprintf(fp, L"%s\n", it.GetPath().c_str());
 			++count;
 		}
 		
@@ -60,6 +71,7 @@ int main() {
 	cout << "all items number: " << count << endl;
 	
 	_findclose(hFile);
+	fclose(fp);
 	system("pause");
 	return 0;
 }
