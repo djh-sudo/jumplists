@@ -102,7 +102,10 @@ public:
 		return m_wsPath;
 	}
 
-	LNK_FILE() = default;
+	LNK_FILE() {
+		memset(&m_header, 0, sizeof(m_header));
+		memset(&m_list, 0, sizeof(m_list));
+	}
 	~LNK_FILE() = default;
 
 private:
