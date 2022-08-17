@@ -9,9 +9,15 @@
 
 #include <Windows.h>
 #include <assert.h>
+#include <iostream>
+#include <sstream>
+#include <locale>
+#include <codecvt>
 #include <list>
 #include <unordered_map>
 #include <string>
+#include "LNK.h"
+
 
 typedef __int64 QWORD;
 
@@ -155,6 +161,7 @@ public:
 	void Init() {
 		m_path = L"";
 		m_lastRecordTime = "";
+		entryID = -1;
 	}
 
 	void setTime(SYSTEMTIME sysTime) {
@@ -174,6 +181,15 @@ public:
 		return true;
 	}
 
+	bool setPath(std::wstring path) {
+		m_path = path;
+		return true;
+	}
+
+	void setEntryID(DWORD id) {
+		entryID = id;
+	}
+
 	std::wstring GetPath() const {
 		return m_path;
 	}
@@ -182,13 +198,16 @@ public:
 		return m_lastRecordTime;
 	}
 
-	DL_ENTRY() = default;
+	DL_ENTRY() {
+		entryID = -1;
+	};
 
 	~DL_ENTRY() = default;
 
 private:
 	std::wstring m_path;
 	std::string m_lastRecordTime;
+	DWORD entryID;
 
 };
 
@@ -234,8 +253,7 @@ public:
 		std::list<DWORD>::iterator it = SATChain[oleHeader.firstDirPos].begin();
 		std::list<DWORD>::iterator end = SATChain[oleHeader.firstDirPos].end();
 
-		bool loop = true;
-		for (DWORD i = 0; i < countSector && it != end && loop; ++i, it++) {
+		for (DWORD i = 0; i < countSector && it != end; ++i, it++) {
 			offset = GetBlock(*it);
 			assert(fseek(fp, offset, SEEK_SET) == 0);
 			for (int k = 0; k < 4; ++k) {
@@ -243,9 +261,10 @@ public:
 				if (!lstrcmpW((dirEntrys + i * 4 + k)->dirName, L"DestList")) {
 					destList = i * 4 + k;
 					dwDestList = (dirEntrys + i * 4 + k)->szStream;
-					loop = false;
-					break;
 				}
+				char name[MAX_PATH] = { 0 };
+				WideCharToMultiByte(CP_ACP, 0, (dirEntrys + i * 4 + k)->dirName, -1, name, MAX_PATH, NULL, NULL);
+				entryMap[name] = i * 4 + k;
 			}
 		}
 		return true;
@@ -468,42 +487,54 @@ public:
 		return true;
 	}
 
-	bool GetDestListFromSSAT() {
-		if (destList == -1)  return false;
-		if (destList >= szDirs) return false;
-		if (dwDestList > 4096) return false;
-
-		DWORD index = (dirEntrys + destList)->firstPos;
+	DWORD GetSSAT(PBYTE buffer, DWORD start) {
+		if (start == -1)  return 0;
+		if (start >= szDirs) return 0;
+		if ((dirEntrys + start)->szStream > 4096) return 0;
+		DWORD index = (dirEntrys + start)->firstPos;
 		if (SSATChain.find(index) == SSATChain.end()) return false;
 		if (SSATChain[index].size() > 64) return false;
-
+		
 		DWORD firstIdx = dirEntrys->firstPos;
 		std::list<DWORD>::iterator it = SATChain[firstIdx].begin();
 		std::list<DWORD>::iterator end = SATChain[firstIdx].end();
-	
+
 		std::list<DWORD>::iterator ssatIt = SSATChain[index].begin();
 		std::list<DWORD>::iterator ssatEnd = SSATChain[index].end();
 
+		DWORD offset = 0;
+		DWORD szRead = 0;
+
+		for (int k = 0; ssatIt != ssatEnd && it != end; k++) {
+			offset = GetBlock(*it++);
+			DWORD threshHold = (k + 1) << 9;
+			DWORD prefix = k << 9;
+
+			while (ssatIt != ssatEnd && GetMiniBlock(*ssatIt) < threshHold) {
+				DWORD index = GetMiniBlock(*ssatIt) - prefix;
+				assert(fseek(fp, offset + index, SEEK_SET) == 0);
+				fread(buffer + szRead, SHORT_SECTOR_SIZE, 1, fp);
+				ssatIt++;
+				szRead += SHORT_SECTOR_SIZE;
+			}
+		}
+		// 
+		assert(szRead >= (dirEntrys + start)->szStream);
+		return szRead;
+	}
+
+	bool GetDestListFromSSAT() {
+		if (dwDestList > 4096) return false;
 		DWORD offset = 0;
 		DWORD szRead = 0;
 		DWORD szEntrys = 0;
 		DWORD oldszRead = 0;
 
 		BYTE content[SECTOR_SIZE << 3] = { 0 };
-		for (int k = 0; ssatIt != ssatEnd && it != end; k++) {
-			offset = GetBlock(*it++);
-			DWORD threshHold = (k + 1) << 9;
-			DWORD prefix = k << 9;
-			
-			while(ssatIt != ssatEnd && GetMiniBlock(*ssatIt) < threshHold){
-				DWORD index = GetMiniBlock(*ssatIt) - prefix;
-				assert(fseek(fp, offset + index, SEEK_SET) == 0);
-				fread(content + szRead, SHORT_SECTOR_SIZE, 1, fp);
-				ssatIt++;
-				szRead += SHORT_SECTOR_SIZE;
-			}
+		szRead = GetSSAT(content, destList);
+		if (szRead == 0) {
+			return false;
 		}
-
 		memcpy(&dlHeader, content, sizeof(dlHeader));
 		szEntrys = dlHeader.szEntry;
 
@@ -516,7 +547,37 @@ public:
 			if (szRead > 4096) break;
 		}
 		return true;
+	}
 
+	bool GetLNKInfoFromSSAT(DWORD entryId) {
+		PBYTE content = new BYTE[SECTOR_SIZE << 3];
+		DWORD dwRead = 0;
+		bool status = false;
+		if (content == NULL) {
+			return false;
+		}
+		do {
+			memset(content, 0, SECTOR_SIZE << 3);
+			std::ostringstream ss;
+			ss << std::hex << entryId;
+			std::string res = ss.str();
+			dwRead = GetSSAT(content, entryMap[res]);
+			if (dwRead == 0) {
+				break;
+			}
+			lnk.Init();
+			status = lnk.Parser(content, dwRead);
+			if (status == false) {
+				break;
+			}
+
+		} while (false);
+
+		if(content != NULL){
+			delete[] content;
+			content = NULL;
+		}
+		return status;
 	}
 
 	DWORD GetdwDestList() const {
@@ -528,10 +589,12 @@ public:
 		dirEntrys = NULL;
 		szDirs = 0;
 		SATChain.clear();
+		SSATChain.clear();
 		fp = NULL;
 		destList = -1;
 		dwDestList = 0;
 		dlEntrys.clear();
+		entryMap.clear();
 		for (int i = 0; i < 4; ++i) {
 			LoopBuffer[i].buffer = NULL;
 			LoopBuffer[i].next = NULL;
@@ -551,7 +614,7 @@ public:
 			it.second.clear();
 		}
 		SATChain.clear();
-
+		SSATChain.clear();
 		for (int i = 0; i < 4; ++i) {
 			if (LoopBuffer[i].buffer != NULL) {
 				delete[] LoopBuffer[i].buffer;
@@ -564,6 +627,7 @@ public:
 
 		std::vector<DL_ENTRY>().swap(dlEntrys);
 		dlEntrys.clear();
+		entryMap.clear();
 	}
 
 private:
@@ -606,12 +670,18 @@ private:
 		// FILETIME lastAccess; // offset :100 - 108
 		// WORD szPath = 0;     // offset :128 - 130
 		do {
-			entry = (DL_ENTRY10*)(content + szRead);
+			entry = (DL_ENTRY10 *)(content + szRead);
 			if (((entry->szPath << 1) + WIN_10_ENTRY + 4 + szRead) < (baseLen << 1)) {
 				obj.Init();
 				ConvertTime(&entry->lastAccessTime, &sysTime);
 				obj.setTime(sysTime);
+				obj.setEntryID(entry->entryID);
 				obj.setPath((wchar_t*)((BYTE*)content + WIN_10_ENTRY + szRead), entry->szPath);
+				if (entry->szPath <= 32 && CheckAlphaNum(obj.GetPath())) {
+					if (GetLNKInfoFromSSAT(entry->entryID)) {
+						obj.setPath(lnk.GetLocalPath());
+					}
+				}
 				dlEntrys.push_back(obj);
 				szRead += WIN_10_ENTRY + (entry->szPath << 1) + 4;
 				++counter;
@@ -659,7 +729,6 @@ private:
 		return;
 	}
 
-
 	void UpdateMemory(BYTE* content, const DWORD loopId, const DWORD szRead) {
 		DWORD curPos = SECTOR_SIZE - szRead;
 		memcpy(content, LoopBuffer[loopId].buffer + szRead, curPos);
@@ -669,10 +738,25 @@ private:
 		return;
 	}
 
+	bool CheckAlphaNum(std::wstring str) {
+		std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+		std::string res = converter.to_bytes(str);
+		for (auto& it : res) {
+			if ((it >= '0' && it <= '9') || (it >= 'a' && it <= 'z')) {
+				continue;
+			}
+			else {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private:
 		FILE* fp;
 		OLE_HEADER oleHeader;/* File header 512 bytes */
 		OLE_DIR* dirEntrys;  /* each dir entry is 128 bytes*/
+		std::unordered_map<std::string, DWORD>entryMap;
 		DWORD szDirs;
 		std::unordered_map<DWORD, std::list<DWORD>>SATChain;
 		std::unordered_map<DWORD, std::list<DWORD>>SSATChain;
@@ -684,5 +768,6 @@ private:
 		DL_HEAD dlHeader;    /* DestList Header 32 bytes */
 		std::vector<DL_ENTRY> dlEntrys;
 		MBL LoopBuffer[4];
+		LNK_FILE lnk;
 };
 

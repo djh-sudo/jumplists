@@ -21,7 +21,7 @@ int main() {
 		return false;
 	}
 	//
-	string basePath = "C:\\Users\\DELL\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*";
+	string basePath = "C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*";
 	long hFile = 0;
 	struct _finddata_t fileInfo;
 	hFile = _findfirst(basePath.c_str(), &fileInfo);
@@ -50,9 +50,11 @@ int main() {
 		if (status == false) {
 			continue;
 		}
-		
+		status = ole.AquireSSATChain();
+		if (status == false) {
+			continue;
+		}
 		if (status && ole.GetdwDestList() <= 4096) {
-			ole.AquireSSATChain();
 			ole.GetDestListFromSSAT();
 		}
 		else {
