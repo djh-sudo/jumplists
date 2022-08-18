@@ -217,7 +217,7 @@ public:
 		m_entryID = -1;
 	};
 
-	~DL_ENTRY() = default;
+	virtual~DL_ENTRY() = default;
 
 private:
 	std::wstring m_path;
@@ -844,4 +844,6 @@ public:
 		return;
 	}
 
+	JumpList() = default;
+	virtual ~JumpList() = default;
 };
