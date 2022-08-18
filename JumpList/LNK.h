@@ -133,10 +133,6 @@ public:
 	}
 
 	FILETIME GetWriteTime() const {
-		BYTE zero[8] = { 0 };
-		if (memcmp(&m_header.writeTime, &zero, 8) == 0) {
-			return m_header.createTime;
-		}
 		return m_header.writeTime;
 	}
 

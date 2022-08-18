@@ -5,9 +5,9 @@
 using namespace std;
 /*
 * Recent access file store at
-* C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*
-* C:\\Users\\Administrator\\Desktop\\djh\\JumpLists\\JumpLists\\test\\cc*
+* C:\\Users\\%username%\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*
 * `cout` may not thread-safe, so please save to file to analysis!
+* Just test on Windows 10 / 11
 */
 
 
@@ -22,6 +22,7 @@ int main() {
 	if (fp == NULL) {
 		return false;
 	}
+	fwprintf(fp, L"absolute path,create time,modify time,last access time\n");
 	//
 	string basePath = "C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*";
 	long hFile = 0;
@@ -62,17 +63,11 @@ int main() {
 			status = ole.GetDestListFromSAT();
 		}
 		
-		// cout << fileInfo.name << ":" << endl;
 		for (auto& it : ole.GetdlEntrys()) {
-			
-			// cout << "\tlastAccess: " << it.GetLastRecordTime() << endl;
-			// wcout << L"\t" << it.GetPath() << endl;
-			fwprintf(fp, L"%s\n", it.GetPath().c_str());
-			/*
+			fwprintf(fp, L"%s,%s,%s,%s\n", it.GetPath().c_str(),
 					 converter.from_bytes(it.GetCreateTime()).c_str(),
 					 converter.from_bytes(it.GetModifyTime()).c_str(),
 					 converter.from_bytes(it.GetLastRecordTime()).c_str());
-			*/
 				     
 			++count;
 		}

@@ -53,13 +53,13 @@ typedef struct _OLE_HEADER {
 	/* 24 */   WORD minorVersion;
 	/* 26 */   WORD majorVersion;
 	/* 28 */   WORD byteOrder;
-	/* 30 */   WORD szSector;
-	/* 32 */   WORD szShortSector;
+	/* 30 */   WORD dwSector;
+	/* 32 */   WORD dwShortSector;
 	/* 34 */   BYTE reserved0[10];
 	/* 44 */   DWORD countSAT;
 	/* 48 */   DWORD firstDirPos;
 	/* 52 */   DWORD reserved1;
-	/* 56 */   DWORD szStandardStream;
+	/* 56 */   DWORD dwStandardStream;
 	/* 60 */   DWORD firstSSATPos;
 	/* 64 */   DWORD countSSAT;
 	/* 68 */   DWORD firsMSATPos;
@@ -70,7 +70,7 @@ typedef struct _OLE_HEADER {
 typedef struct _OLE_DIRECTORY_ENTRY {
 	/* offset  Description */
 	/*  0  */   wchar_t dirName[32];
-	/*  64 */   WORD szDirName;
+	/*  64 */   WORD dwDirName;
 	/*  66 */   BYTE type;
 	/*  67 */   BYTE nodeColor;
 	/*  68 */   DWORD leftChild;
@@ -81,7 +81,7 @@ typedef struct _OLE_DIRECTORY_ENTRY {
 	/* 100 */   FILETIME createTime;
 	/* 108 */   FILETIME modifyTime;
 	/* 116 */   DWORD firstPos;
-	/* 120 */   DWORD szStream;
+	/* 120 */   DWORD dwStream;
 	/* 124 */   DWORD reserved;
 
 }OLE_DIR;
@@ -161,6 +161,8 @@ public:
 	void Init() {
 		m_path = L"";
 		m_lastRecordTime = "";
+		m_createTime = "";
+		m_modifyTime = "";
 		m_entryID = -1;
 	}
 
@@ -191,9 +193,9 @@ public:
 		return;
 	}
 
-	bool SetPath(const wchar_t* p, DWORD szPath) {
-		m_path = std::wstring(p, szPath);
-		if (m_path.size() != szPath) {
+	bool SetPath(const wchar_t* p, DWORD dwPath) {
+		m_path = std::wstring(p, dwPath);
+		if (m_path.size() != dwPath) {
 			return false;
 		}
 		return true;
@@ -259,7 +261,7 @@ public:
 		if (m_fp == NULL) return false;
 		else {
 			fread(&m_oleHeader, sizeof(m_oleHeader), 1, m_fp);
-			if ((1 << m_oleHeader.szSector) == SECTOR_SIZE && (1 << m_oleHeader.szShortSector) == SHORT_SECTOR_SIZE)
+			if ((1 << m_oleHeader.dwSector) == SECTOR_SIZE && (1 << m_oleHeader.dwShortSector) == SHORT_SECTOR_SIZE)
 				return true;
 			else
 				return false;
@@ -271,11 +273,11 @@ public:
 		if (SATChain.find(m_oleHeader.firstDirPos) == SATChain.end()) return false;
 
 		DWORD countSector = SATChain[m_oleHeader.firstDirPos].size();
-		// one sector(512) can store 4 direntrys(128)
-		m_szDirs = countSector << 2;
-		m_dirEntrys = new OLE_DIR[m_szDirs];
-		if (m_dirEntrys == NULL) return false;// assert(dirEntrys != NULL);
-		memset(m_dirEntrys, 0, m_szDirs * sizeof(OLE_DIR));
+		// one sector(512) can store 4 directory entries (128)
+		m_dwDirs = countSector << 2;
+		m_dirEntrys = new OLE_DIR[m_dwDirs];
+		if (m_dirEntrys == NULL) return false;
+		memset(m_dirEntrys, 0, m_dwDirs * sizeof(OLE_DIR));
 
 		DWORD offset = 0;
 		std::list<DWORD>::iterator it = SATChain[m_oleHeader.firstDirPos].begin();
@@ -288,7 +290,7 @@ public:
 				fread(m_dirEntrys + i * 4 + k, DIR_SIZE, 1, m_fp);
 				if (!lstrcmpW((m_dirEntrys + i * 4 + k)->dirName, L"DestList")) {
 					m_destList = i * 4 + k;
-					m_dwDestList = (m_dirEntrys + i * 4 + k)->szStream;
+					m_dwDestList = (m_dirEntrys + i * 4 + k)->dwStream;
 				}
 				char name[MAX_PATH] = { 0 };
 				WideCharToMultiByte(CP_ACP, 0, (m_dirEntrys + i * 4 + k)->dirName, -1, name, MAX_PATH, NULL, NULL);
@@ -451,7 +453,7 @@ public:
 
 	bool GetDestListFromSAT() {
 		if (m_destList == -1)  return false;
-		if (m_destList >= m_szDirs) return false;
+		if (m_destList >= m_dwDirs) return false;
 		if (!InitBufferMemory()) return false;
 
 		DWORD index = (m_dirEntrys + m_destList)->firstPos;
@@ -463,10 +465,10 @@ public:
 
 		DWORD offset = 0;
 		DWORD loopId = 0;
-		DWORD szRead = 32;
-		DWORD szEntrys = 0;
+		DWORD dwRead = 32;
+		DWORD dwEntrys = 0;
 		DWORD curPos = 0;
-		DWORD oldszRead = 0;
+		DWORD dwOldRead = 0;
 		bool endFlag = false;
 
 		for (int i = 0; i < 4 && it != end; ++i) {
@@ -476,39 +478,39 @@ public:
 		}
 
 		memcpy(&m_dlHeader, m_LoopBuffer[loopId].buffer, sizeof(m_dlHeader));
-		szEntrys = m_dlHeader.szEntry;
+		dwEntrys = m_dlHeader.szEntry;
 
 		BYTE content[SECTOR_SIZE << 1] = { 0 };
 		DWORD i = 0;
-		for (i = 0; i < szEntrys;) {
+		for (i = 0; i < dwEntrys;) {
 			memset(content, 0, SECTOR_SIZE << 1);
-			UpdateMemory(content, loopId, szRead);
+			UpdateMemory(content, loopId, dwRead);
 			// Analysis DestList
-			oldszRead = AnalyseDestList(content, i);
-			if (oldszRead == 0) {
+			dwOldRead = AnalyseDestList(content, i);
+			if (dwOldRead == 0) {
 				// slow path
-				if (i < szEntrys) {
+				if (i < dwEntrys) {
 					BYTE largeMemory[SECTOR_SIZE << 2] = { 0 };
 					memcpy(largeMemory, content, SECTOR_SIZE << 1);
 					UpdateMemory(largeMemory + (SECTOR_SIZE << 1), loopId, 0);
-					oldszRead = AnalyseDestList(largeMemory, i, SECTOR_SIZE << 1);
+					dwOldRead = AnalyseDestList(largeMemory, i, SECTOR_SIZE << 1);
 				}
-				if (oldszRead == 0) {
+				if (dwOldRead == 0) {
 					break;
 				}
 			}
-			szRead += oldszRead;
-			while (szRead > SECTOR_SIZE) {
+			dwRead += dwOldRead;
+			while (dwRead > SECTOR_SIZE) {
 				if (it != end) {
-					UpdateSector(*it++, loopId, szRead, endFlag);
+					UpdateSector(*it++, loopId, dwRead, endFlag);
 					continue;
 				}
 				if (it == end) {
-					UpdateSector(0, loopId, szRead, true);
+					UpdateSector(0, loopId, dwRead, true);
 				}
 			}
 		}
-		if (i < szEntrys) {
+		if (i < dwEntrys) {
 			
 			return false;
 		}
@@ -517,8 +519,8 @@ public:
 
 	DWORD GetSSAT(PBYTE buffer, DWORD start) {
 		if (start == -1)  return 0;
-		if (start >= m_szDirs) return 0;
-		if ((m_dirEntrys + start)->szStream > 4096) return 0;
+		if (start >= m_dwDirs) return 0;
+		if ((m_dirEntrys + start)->dwStream > 4096) return 0;
 		DWORD index = (m_dirEntrys + start)->firstPos;
 		if (SSATChain.find(index) == SSATChain.end()) return false;
 		if (SSATChain[index].size() > 64) return false;
@@ -531,7 +533,7 @@ public:
 		std::list<DWORD>::iterator ssatEnd = SSATChain[index].end();
 
 		DWORD offset = 0;
-		DWORD szRead = 0;
+		DWORD dwRead = 0;
 
 		for (int k = 0; ssatIt != ssatEnd && it != end; k++) {
 			offset = GetBlock(*it++);
@@ -541,41 +543,40 @@ public:
 			while (ssatIt != ssatEnd && GetMiniBlock(*ssatIt) < threshHold) {
 				DWORD index = GetMiniBlock(*ssatIt) - prefix;
 				assert(fseek(m_fp, offset + index, SEEK_SET) == 0);
-				fread(buffer + szRead, SHORT_SECTOR_SIZE, 1, m_fp);
+				fread(buffer + dwRead, SHORT_SECTOR_SIZE, 1, m_fp);
 				ssatIt++;
-				szRead += SHORT_SECTOR_SIZE;
+				dwRead += SHORT_SECTOR_SIZE;
 			}
 		}
 		// assert(szRead >= (m_dirEntrys + start)->szStream);
-		return szRead;
+		return dwRead;
 	}
 
 	bool GetDestListFromSSAT() {
 		if (m_dwDestList > 4096) return false;
 		DWORD offset = 0;
-		DWORD szRead = 0;
-		DWORD szEntrys = 0;
-		DWORD oldszRead = 0;
+		DWORD dwRead = 0;
+		DWORD dwEntrys = 0;
+		DWORD dwOldRead = 0;
 
 		BYTE content[SECTOR_SIZE << 3] = { 0 };
-		szRead = GetSSAT(content, m_destList);
-		if (szRead == 0) {
+		dwRead = GetSSAT(content, m_destList);
+		if (dwRead == 0) {
 			return false;
 		}
 		memcpy(&m_dlHeader, content, sizeof(m_dlHeader));
-		szEntrys = m_dlHeader.szEntry;
+		dwEntrys = m_dlHeader.szEntry;
 
-		szRead = 32;
+		dwRead = 32;
 		DWORD i = 0;
-		for (i = 0; i < szEntrys;) {
+		for (i = 0; i < dwEntrys;) {
 			// Analysis DestList
-			oldszRead = AnalyseDestList(content + szRead, i);
-			if (oldszRead == 0 || oldszRead > (SECTOR_SIZE << 1)) break;
-			szRead += oldszRead;
-			if (szRead > 4096) break;
+			dwOldRead = AnalyseDestList(content + dwRead, i);
+			if (dwOldRead == 0 || dwOldRead > (SECTOR_SIZE << 1)) break;
+			dwRead += dwOldRead;
+			if (dwRead > 4096) break;
 		}
-		if (i < szEntrys) {
-			std::cout << "Warning!" << std::endl;
+		if (i < dwEntrys) {
 			return false;
 		}
 		return true;
@@ -619,7 +620,7 @@ public:
 	OLE_OBJECT() {
 		memset(&m_oleHeader, 0, sizeof(m_oleHeader));
 		m_dirEntrys = NULL;
-		m_szDirs = 0;
+		m_dwDirs = 0;
 		SATChain.clear();
 		SSATChain.clear();
 		m_fp = NULL;
@@ -702,8 +703,6 @@ private:
 		DL_ENTRY obj;
 		SYSTEMTIME sysTime;
 
-		// FILETIME lastAccess; // offset :100 - 108
-		// WORD szPath = 0;     // offset :128 - 130
 		do {
 			entry = (DL_ENTRY10 *)(content + dwRead);
 			if (((entry->szPath << 1) + WIN_10_ENTRY + 4 + dwRead) < (baseLen << 1)) {
@@ -768,17 +767,17 @@ private:
 		}
 		// step 2 Step Next Memory
 		loopId = (loopId + 1) % LOOP_SIZE;
-		// step 3 Update szRead
+		// step 3 Update dwRead
 		dwRead = dwRead - SECTOR_SIZE;
 		return;
 	}
 
-	void UpdateMemory(BYTE* content, const DWORD loopId, const DWORD szRead) {
-		DWORD curPos = SECTOR_SIZE - szRead;
-		memcpy(content, m_LoopBuffer[loopId].buffer + szRead, curPos);
+	void UpdateMemory(BYTE* content, const DWORD loopId, const DWORD dwRead) {
+		DWORD curPos = SECTOR_SIZE - dwRead;
+		memcpy(content, m_LoopBuffer[loopId].buffer + dwRead, curPos);
 		memcpy(content + curPos, m_LoopBuffer[(loopId + 1) % LOOP_SIZE].buffer, SECTOR_SIZE);
 		curPos += SECTOR_SIZE;
-		memcpy(content + curPos, m_LoopBuffer[(loopId + 2) % LOOP_SIZE].buffer, szRead);
+		memcpy(content + curPos, m_LoopBuffer[(loopId + 2) % LOOP_SIZE].buffer, dwRead);
 		return;
 	}
 
@@ -795,7 +794,7 @@ private:
 		OLE_HEADER m_oleHeader;/* File header 512 bytes */
 		OLE_DIR* m_dirEntrys;  /* each dir entry is 128 bytes*/
 		std::unordered_map<std::string, DWORD>m_entryMap;
-		DWORD m_szDirs;
+		DWORD m_dwDirs;
 		std::unordered_map<DWORD, std::list<DWORD>>SATChain;
 		std::unordered_map<DWORD, std::list<DWORD>>SSATChain;
 		/* DestList index in dir entry
