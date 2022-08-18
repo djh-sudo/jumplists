@@ -14,6 +14,7 @@
 #include <list>
 #include <unordered_map>
 #include <string>
+#include <regex>
 #include <Windows.h>
 #include <assert.h>
 #include "LNK.h"
@@ -163,7 +164,7 @@ public:
 		m_entryID = -1;
 	}
 
-	void setTime(SYSTEMTIME sysTime) {
+	void SetLastAccessTime(SYSTEMTIME sysTime) {
 		char tmpTime[32] = { 0 };
 		sprintf(tmpTime, "%04d/%02d/%02d %02d:%02d:%02d",
 			sysTime.wYear, sysTime.wMonth, sysTime.wDay,
@@ -172,7 +173,25 @@ public:
 		return;
 	}
 
-	bool setPath(const wchar_t* p, DWORD szPath) {
+	void SetCreateTime(SYSTEMTIME sysTime) {
+		char tmpTime[32] = { 0 };
+		sprintf(tmpTime, "%04d/%02d/%02d %02d:%02d:%02d",
+			sysTime.wYear, sysTime.wMonth, sysTime.wDay,
+			sysTime.wHour, sysTime.wMinute, sysTime.wSecond);
+		this->m_createTime = std::string(tmpTime, 32);
+		return;
+	}
+
+	void SetModifyTime(SYSTEMTIME sysTime) {
+		char tmpTime[32] = { 0 };
+		sprintf(tmpTime, "%04d/%02d/%02d %02d:%02d:%02d",
+			sysTime.wYear, sysTime.wMonth, sysTime.wDay,
+			sysTime.wHour, sysTime.wMinute, sysTime.wSecond);
+		this->m_modifyTime = std::string(tmpTime, 32);
+		return;
+	}
+
+	bool SetPath(const wchar_t* p, DWORD szPath) {
 		m_path = std::wstring(p, szPath);
 		if (m_path.size() != szPath) {
 			return false;
@@ -180,12 +199,12 @@ public:
 		return true;
 	}
 
-	bool setPath(std::wstring path) {
+	bool SetPath(std::wstring path) {
 		m_path = path;
 		return true;
 	}
 
-	void setEntryID(DWORD id) {
+	void SetEntryID(DWORD id) {
 		m_entryID = id;
 	}
 
@@ -197,6 +216,14 @@ public:
 		return m_lastRecordTime;
 	}
 
+	std::string GetCreateTime() const {
+		return m_createTime;
+	}
+
+	std::string GetModifyTime() const {
+		return m_modifyTime;
+	}
+
 	DL_ENTRY() {
 		m_entryID = -1;
 	};
@@ -206,6 +233,8 @@ public:
 private:
 	std::wstring m_path;
 	std::string m_lastRecordTime;
+	std::string m_createTime;
+	std::string m_modifyTime;
 	DWORD m_entryID;
 
 };
@@ -480,6 +509,7 @@ public:
 			}
 		}
 		if (i < szEntrys) {
+			
 			return false;
 		}
 		return true;
@@ -516,8 +546,7 @@ public:
 				szRead += SHORT_SECTOR_SIZE;
 			}
 		}
-		// 
-		assert(szRead >= (m_dirEntrys + start)->szStream);
+		// assert(szRead >= (m_dirEntrys + start)->szStream);
 		return szRead;
 	}
 
@@ -537,12 +566,17 @@ public:
 		szEntrys = m_dlHeader.szEntry;
 
 		szRead = 32;
-		for (DWORD i = 0; i < szEntrys;) {
+		DWORD i = 0;
+		for (i = 0; i < szEntrys;) {
 			// Analysis DestList
 			oldszRead = AnalyseDestList(content + szRead, i);
 			if (oldszRead == 0 || oldszRead > (SECTOR_SIZE << 1)) break;
 			szRead += oldszRead;
 			if (szRead > 4096) break;
+		}
+		if (i < szEntrys) {
+			std::cout << "Warning!" << std::endl;
+			return false;
 		}
 		return true;
 	}
@@ -675,13 +709,22 @@ private:
 			if (((entry->szPath << 1) + WIN_10_ENTRY + 4 + dwRead) < (baseLen << 1)) {
 				obj.Init();
 				ConvertTime(&entry->lastAccessTime, &sysTime);
-				obj.setTime(sysTime);
-				obj.setEntryID(entry->entryID);
-				obj.setPath((wchar_t*)((BYTE*)content + WIN_10_ENTRY + dwRead), entry->szPath);
-				if (entry->szPath <= 32 && CheckAlphaNum(obj.GetPath())) {
-					if (GetLNKInfoFromSSAT(entry->entryID)) {
-						obj.setPath(m_lnk.GetLocalPath());
+				obj.SetLastAccessTime(sysTime);
+				obj.SetEntryID(entry->entryID);
+				obj.SetPath((wchar_t*)((BYTE*)content + WIN_10_ENTRY + dwRead), entry->szPath);
+				if (GetLNKInfoFromSSAT(entry->entryID)) {
+					if (entry->szPath <= 32 && CheckRules(obj.GetPath())) {
+						obj.SetPath(m_lnk.GetLocalPath());
 					}
+				}
+				if (m_lnk.HasTime()) {
+					FILETIME createTime = m_lnk.GetCreateTime();
+					ConvertTime(&createTime, &sysTime);
+					obj.SetCreateTime(sysTime);
+
+					FILETIME modifyTime = m_lnk.GetWriteTime();
+					ConvertTime(&modifyTime, &sysTime);
+					obj.SetModifyTime(sysTime);
 				}
 				m_dlEntrys.push_back(obj);
 				dwRead += WIN_10_ENTRY + (entry->szPath << 1) + 4;
@@ -739,18 +782,12 @@ private:
 		return;
 	}
 
-	bool CheckAlphaNum(std::wstring str) {
+	bool CheckRules(std::wstring str) {
 		std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
 		std::string res = converter.to_bytes(str);
-		for (auto& it : res) {
-			if ((it >= '0' && it <= '9') || (it >= 'a' && it <= 'z')) {
-				continue;
-			}
-			else {
-				return false;
-			}
-		}
-		return true;
+		std::regex reg("^[0-9a-zA-Z]+$");
+		bool check = std::regex_match(res, reg);
+		return check;
 	}
 
 	private:

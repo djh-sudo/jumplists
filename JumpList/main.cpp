@@ -7,16 +7,18 @@ using namespace std;
 * Recent access file store at
 * C:\\Users\\Administrator\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\*
 * C:\\Users\\Administrator\\Desktop\\djh\\JumpLists\\JumpLists\\test\\cc*
+* `cout` may not thread-safe, so please save to file to analysis!
 */
 
 
 int main() {
 	ios::sync_with_stdio(false);
 	locale::global(locale(""));
+	std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
 	bool status = false;
 	//
 	FILE* fp = NULL;
-	fopen_s(&fp, "result.txt", "w, ccs=utf-8");
+	fopen_s(&fp, "result.csv", "w, ccs=utf-8");
 	if (fp == NULL) {
 		return false;
 	}
@@ -31,7 +33,6 @@ int main() {
 	}
 	unsigned int count = 0;
 	basePath.pop_back();
-
 	do {
 		if (!strcmp(fileInfo.name, ".") ||  !strcmp(fileInfo.name, "..")) {
 			continue;
@@ -67,6 +68,12 @@ int main() {
 			// cout << "\tlastAccess: " << it.GetLastRecordTime() << endl;
 			// wcout << L"\t" << it.GetPath() << endl;
 			fwprintf(fp, L"%s\n", it.GetPath().c_str());
+			/*
+					 converter.from_bytes(it.GetCreateTime()).c_str(),
+					 converter.from_bytes(it.GetModifyTime()).c_str(),
+					 converter.from_bytes(it.GetLastRecordTime()).c_str());
+			*/
+				     
 			++count;
 		}
 		
