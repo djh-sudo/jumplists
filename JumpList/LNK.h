@@ -149,7 +149,8 @@ public:
 		memset(&m_list, 0, sizeof(m_list));
 		m_hasTime = false;
 	}
-	~LNK_FILE() = default;
+	
+	virtual ~LNK_FILE() = default;
 
 private:
 	LNK_HEADER m_header;

@@ -511,7 +511,6 @@ public:
 			}
 		}
 		if (i < dwEntrys) {
-			
 			return false;
 		}
 		return true;
@@ -634,20 +633,27 @@ public:
 		}
 	}
 
-	~OLE_OBJECT() {
+	virtual ~OLE_OBJECT() {
 		// free memory
-		delete[] m_dirEntrys;
-		m_dirEntrys = NULL;
-
+		if (m_dirEntrys != NULL) {
+			delete[] m_dirEntrys;
+			m_dirEntrys = NULL;
+		}
+		
 		if (m_fp != NULL) {
 			fclose(m_fp);
 			m_fp = NULL;
 		}
+
 		for (auto& it : SATChain) {
 			it.second.clear();
 		}
 		SATChain.clear();
+		for (auto& it : SSATChain) {
+			it.second.clear();
+		}
 		SSATChain.clear();
+
 		for (int i = 0; i < LOOP_SIZE; ++i) {
 			if (m_LoopBuffer[i].buffer != NULL) {
 				delete[] m_LoopBuffer[i].buffer;
